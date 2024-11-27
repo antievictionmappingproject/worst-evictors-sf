@@ -1,28 +1,29 @@
-import "dotenv/config"
-import { createClient } from "contentful"
-import type { EntryCollection } from "contentful"
-import getEBEntry from "./getEBEntry"
+import 'dotenv/config'
+import {createClient} from 'contentful'
+import type {EntryCollection} from 'contentful'
+import getEBEntry from './getEBEntry'
+import {sequentialFetch} from './sequentialFetch'
 
 export default async function fetchEvictorData() {
   const client = createClient({
     space: process.env.SPACE_ID,
-    environment: "master",
+    environment: 'master',
     accessToken: process.env.ACCESS_TOKEN,
   })
 
   // changed content_type id from sfEvictors to just evictors on the
   // online GUI but it's not updating for the API response LOL
   const result = (await client
-    .getEntries({ content_type: "sfEvictors" })
+    .getEntries({content_type: 'sfEvictors'})
     .catch(console.error)) as EntryCollection<any>
 
-  const evictors = result.items
-    .map(async (item) => {
+  const evictors = await sequentialFetch(
+    result.items.map((item) => async () => {
       try {
         // pullQuote + citywideListDescription has way too many fields to query
         // ergonomically, so we'll just grab it as a string
         // this is how the contentful cms presents it too
-        const { ebEntry, name, pullQuote, citywideListDescription } =
+        const {ebEntry, name, pullQuote, citywideListDescription} =
           item.fields
 
         if (!ebEntry?.length) {
@@ -30,19 +31,20 @@ export default async function fetchEvictorData() {
             `${name} doesn't have an Evictorbook entry entered on Contentful`
           )
         }
-
-        const ebData = await Promise.all(
-          ebEntry.map((business: string) =>
-            getEBEntry(business).catch((err) => {
-              console.error(`Error on ${name}, ${ebEntry}: ${err}`)
-            })
-          )
+        console.log(`Fetching data for ${name}...`)
+        const ebData = await sequentialFetch(
+          ebEntry.map((business: string) => {
+            return () =>
+              getEBEntry(business).catch((err) => {
+                console.error(`Error on ${name}, ${ebEntry}: ${err}`)
+              })
+          })
         )
 
         /* Validation for common missing data types
          * Added on Contentful, but contentful does not perform validation for existing entries
          * */
-        if (typeof item.fields.nonprofitOrLowIncome === "undefined") {
+        if (typeof item.fields.nonprofitOrLowIncome === 'undefined') {
           console.warn(`${name} is missing nonprofit status`)
         }
         if (!item.fields.photo) {
@@ -53,7 +55,7 @@ export default async function fetchEvictorData() {
         }
 
         // Count unique evictions
-        const uniqueEvictions: { [evictionId: string]: any } = {}
+        const uniqueEvictions: {[evictionId: string]: any} = {}
         ebData.forEach((business) => {
           business.evictions.forEach((eviction) => {
             uniqueEvictions[eviction.evict_id] = eviction
@@ -62,7 +64,7 @@ export default async function fetchEvictorData() {
         const totalEvictions = Object.keys(uniqueEvictions).length
 
         // same thing but for properties, logic is slightly different.
-        const uniqueUnits: { [parcelId: string]: number } = {}
+        const uniqueUnits: {[parcelId: string]: number} = {}
         ebData.forEach((business) => {
           business.portfolio.forEach((parcel) => {
             uniqueUnits[parcel.parcel_id] = parcel.units
@@ -94,7 +96,7 @@ export default async function fetchEvictorData() {
             async (shells: Promise<string[]>, business) => {
               const networkId = business.networkDetails[0].network_id
               const networkUrl = `${
-                process.env.EB_DOMAIN || "https://evictorbook.com"
+                process.env.EB_DOMAIN || 'https://evictorbook.com'
               }/api/network/${networkId}/nodes`
               const nodes = await fetch(networkUrl).then((res) =>
                 res.json()
@@ -102,7 +104,7 @@ export default async function fetchEvictorData() {
 
               const newShells = nodes.records
                 .sort((a, b) => b.degree - a.degree)
-                .filter((n) => n.type === "Business")
+                .filter((n) => n.type === 'Business')
                 .slice(0, 10)
                 .map((b) => b.name)
               return [...(await shells), ...newShells]
@@ -136,7 +138,7 @@ export default async function fetchEvictorData() {
           totalUnits,
           shellCompanies,
           evictions: Object.values(uniqueEvictions),
-          pullQuote: { raw: JSON.stringify(pullQuote) },
+          pullQuote: {raw: JSON.stringify(pullQuote)},
           citywideListDescription: {
             raw: JSON.stringify(citywideListDescription),
           },
@@ -145,7 +147,7 @@ export default async function fetchEvictorData() {
         console.error(`${e}: ${item.fields.name}`)
       }
     })
-    .filter((evictor) => evictor) // 'undefined' is falsy
+  )
 
-  return await Promise.all(evictors)
+  return evictors.filter((evictor) => evictor) // 'undefined' is falsy
 }

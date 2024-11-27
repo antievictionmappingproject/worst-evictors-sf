@@ -1,3 +1,5 @@
+import {sequentialFetch} from './sequentialFetch'
+
 const domain = process.env.EB_DOMAIN || 'https://evictorbook.com/'
 const BASE = `${domain}/api/owner`
 
@@ -30,8 +32,8 @@ export default async function getEBEntry(ebName: string) {
   ]
 
   const escaped = encodeURI(`${domain}/owner/${ebName}`)
-  const result = await Promise.all(
-    slices.map((slice) => getSlice(ebName, slice))
+  const result = await sequentialFetch(
+    slices.map((slice) => () => getSlice(ebName, slice))
   )
 
   // array of objects with single (unique) property into single object
