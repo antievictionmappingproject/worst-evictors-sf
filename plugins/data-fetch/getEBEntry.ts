@@ -26,7 +26,6 @@ export default async function getEBEntry(ebName: string) {
     'details',
     'evictions',
     'networkDetails',
-    'relatedNetworks',
     'portfolio',
   ]
 
